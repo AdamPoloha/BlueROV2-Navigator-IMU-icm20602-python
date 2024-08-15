@@ -3,9 +3,21 @@ import time
 
 class Vector3D:
     def __init__(self, data):
-        self.x = int.from_bytes(data[0:2], "big", signed=True)
-        self.y = int.from_bytes(data[2:4], "big", signed=True)
-        self.z = int.from_bytes(data[4:6], "big", signed=True)
+        hx = data[0]
+        if hx > 127:
+            hx = hx - 256
+        self.x = (hx * 256) + data[1]
+        hy = data[2]
+        if hy > 127:
+            hy = hy - 256
+        self.y = (hy * 256) + data[3]
+        hz = data[4]
+        if hz > 127:
+            hz = hz - 256
+        self.z = (hz * 256) + data[5]
+        #self.x = int.from_bytes(data[0:2], "big", signed=True)
+        #self.y = int.from_bytes(data[2:4], "big", signed=True)
+        #self.z = int.from_bytes(data[4:6], "big", signed=True)
     
     def __mul__(self, other):
         result = Vector3D([0]*6)
@@ -20,7 +32,11 @@ class Vector3D:
 class ICMData:
     def __init__(self, rawdata):
         self.a_raw = Vector3D(rawdata[0:6])
-        self.t_raw = int.from_bytes(rawdata[6:8], "big", signed=True)
+        ht = rawdata[6]
+        if ht > 127:
+            ht = ht - 256
+        self.t_raw = (ht * 256) + rawdata[7]
+        #self.t_raw = int.from_bytes(rawdata[6:8], "big", signed=True)
         self.g_raw = Vector3D(rawdata[8:14])
 
         self.a = self.a_raw*(2.0/0x8000)
@@ -127,7 +143,9 @@ class ICM20602(object):
         self._id = self.read_id()
         print("detected device id %d on bus %s" % (self._id, bus))
         self.initialize()
-
+    
+    def closeport(self):
+        self._bus.close()
 
     def initialize(self):
         # disable i2c communication
