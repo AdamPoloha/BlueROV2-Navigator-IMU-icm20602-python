@@ -111,33 +111,35 @@ class ICM20602(object):
     REG_ZA_OFFSET_H = 0x7D
     REG_ZA_OFFSET_L = 0x7E
 
-    def __init__(self, bus=1, cs=2):
-
+    def __init__(self, bus=1, cs=2, bus_sp=10000000, afssel=0, gfssel=0, adlpf=0, gdlpf=1, afchb=0, gfchb=0):
+        
+        self.afssel = afssel
+        self.gfssel = gfssel
         # gyro digital low pass filter configuration parameters
         # see register 26 documentation
         # Note bit 7 should be set to 0 by the user
-        self._dlpf_cfg = 0x1 # 1kHz sample rate
+        self._dlpf_cfg = gdlpf # 1kHz sample rate
 
         # gyro configuration
         # see register 27 documentation
-        self._gyro_fs_sel = 0x0 << 3 # full scale resolution
-        self._fchoice_b = 0x0 # dlpf bandwidth bypass
+        self._gyro_fs_sel = gfssel << 3
+        self._fchoice_b = gfchb # dlpf bandwidth bypass
 
         # accelerometer configuration
         # see register 0x28 documentation
-        self._accel_fs_sel = 0x0 << 3
+        self._accel_fs_sel = afssel << 3
 
         # accelerometer configuration 2
         # see register 0x29 documentation
-        self._accel_fchoice_b = 0 << 3 # no bypass, 1khz output
-        self._accel_dlpf_cfg = 0
+        self._accel_fchoice_b = afchb << 3 # no bypass, 1khz output
+        self._accel_dlpf_cfg = adlpf
 
         # see register 0x70, enable/disable i2c interface
         self.i2c = False
 
         self._bus = spidev.SpiDev()
         self._bus.open(bus, cs)
-        self._bus.max_speed_hz = 10000000
+        self._bus.max_speed_hz = bus_sp
 
         print("reset", self.reset())
         self._id = self.read_id()
@@ -196,9 +198,71 @@ class ICM20602(object):
 
         return ICMData(data)
 
-    # todo!
-    def self_test(self):
-        pass
+    def self_test(self, passperc=14): #pass percentage of MPU6050 by default
+        gyrconfig = self.read(self.REG_GYRO_CONFIG) # Read config
+        accconfig = self.read(self.REG_ACCEL_CONFIG)
+        gyrconfig[0] = gyrconfig[0] | 0b11100000 # In GYRO_CONFIG 1B, first 3 bits are (X,Y,Z)G_ST
+        accconfig[0] = accconfig[0] | 0b11100000 # In ACCEL_CONFIG 1C, first 3 bits are (X,Y,Z)A_ST
+        
+        self.write(self.REG_GYRO_CONFIG, gyrconfig) # Start test
+        self.write(self.REG_ACCEL_CONFIG, accconfig)
+        time.sleep(0.1)
+        ontest = self.read_all()
+        onresult = [ontest.a_raw.x, ontest.a_raw.y, ontest.a_raw.z, ontest.g_raw.x, ontest.g_raw.y, ontest.g_raw.z]
+        gyrconfig[0] = gyrconfig[0] & 0b00011111 # Off
+        accconfig[0] = accconfig[0] & 0b00011111
+        self.write(self.REG_GYRO_CONFIG, gyrconfig) # Stop test
+        self.write(self.REG_ACCEL_CONFIG, accconfig)
+        time.sleep(0.1)
+        offtest = self.read_all()
+        offresult = [offtest.a_raw.x, offtest.a_raw.y, offtest.a_raw.z, offtest.g_raw.x, offtest.g_raw.y, offtest.g_raw.z]
+        
+        response = onresult.copy()
+        c = 0
+        while c < 6:
+            # The self-test response is defined as follows:
+            response[c] = onresult[c] - offresult[c] # SELF-TEST RESPONSE = SENSOR OUTPUT WITH SELF-TEST ENABLED – SENSOR OUTPUT WITH SELF-TEST DISABLED
+            c = c + 1
+        #print(response)
+        
+        gyrman = self.read(self.REG_SELF_TEST_X_GYRO, 3) # SELF_TEST_(X,Y,Z)_GYRO 50,51,52 are manufacturing output
+        accman = self.read(self.REG_SELF_TEST_X_ACCEL, 3) # SELF_TEST_(X,Y,Z)_ACCEL 0D,0E,0F are manufacturing output
+        
+        factory = [accman[0], accman[1], accman[2], gyrman[0], gyrman[1], gyrman[2]]
+        #print(factory)
+        FS = self.afssel #+ 1
+        FSg = self.gfssel #+ 1
+        #print(FS,FSg)
+        c = 0
+        while c < 6:
+            if c > 2:
+                FS = FSg
+            # The equation to convert self-test codes in OTP to factory self-test measurement is:
+            factory[c] = (2620/pow(2, FS)) * pow(1.01, (factory[c] -1)) # ST_OTP = (2620/(2^FS))*1.01^(ST_code-1) (lsb)
+            # Assuming FS is FS_SEL, gyroscope >=250 will always fail if FS is the range itself
+            # If acc FS is 2 and gyr FS is 250, the test results will be very different
+            # MPU6050: FT(Xg) = 25 * 131 * 1.046^(XG_TEST-1), XG_TEST is from the self-test register
+            # For MPU6050, test is only done at lowest range
+            c = c + 1
+        #print(factory)
+        
+        dFT = factory.copy()
+        c = 0
+        while c < 6:
+            dFT[c] = (response[c]-factory[c])/factory[c] * 100 # dFT(%) = (STR-ST_OTP)/ST_OTP
+            c = c + 1
+        #print("Percentage differences to factory test:", dFT)
+        
+        axes = ["AX","AY","AZ","GX","GY","GZ"]
+        c = 0
+        while c < 6:
+            if -passperc <= dFT[c] and dFT[c] <= passperc:
+                print(axes[c], "has passed:", dFT[c], "/", passperc)
+            else:
+                print(axes[c], "has failed:", dFT[c], "/", passperc)
+            c = c + 1
+        
+        return dFT
 
     # todo write and verify
     def write(self, reg, data):
