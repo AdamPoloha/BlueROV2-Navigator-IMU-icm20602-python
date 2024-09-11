@@ -177,7 +177,7 @@ class ICM20602(object):
         time.sleep(0.1)
 
     def reset(self):
-        self.write(self.REG_PWR_MGMT_1, [0x80])
+        self.write(self.REG_PWR_MGMT_1, [0x80], ignorefail=1)
         time.sleep(0.01)
         # device reset bit is cleared when device reset is complete
         return self.readbyte(self.REG_PWR_MGMT_1) == 0x41
@@ -217,11 +217,12 @@ class ICM20602(object):
         offtest = self.read_all()
         offresult = [offtest.a_raw.x, offtest.a_raw.y, offtest.a_raw.z, offtest.g_raw.x, offtest.g_raw.y, offtest.g_raw.z]
         
-        response = onresult.copy()
+        response = list(onresult)
         c = 0
         while c < 6:
             # The self-test response is defined as follows:
-            response[c] = onresult[c] - offresult[c] # SELF-TEST RESPONSE = SENSOR OUTPUT WITH SELF-TEST ENABLED – SENSOR OUTPUT WITH SELF-TEST DISABLED
+            #print(float(onresult[c]), float(offresult[c]))
+            response[c] = float(onresult[c]) - float(offresult[c]) # SELF-TEST RESPONSE = SENSOR OUTPUT WITH SELF-TEST ENABLED SENSOR OUTPUT WITH SELF-TEST DISABLED
             c = c + 1
         #print(response)
         
@@ -246,9 +247,10 @@ class ICM20602(object):
             c = c + 1
         #print(factory)
         
-        dFT = factory.copy()
+        dFT = list(factory)
         c = 0
         while c < 6:
+            #print(float(response[c]),factory[c])
             dFT[c] = (response[c]-factory[c])/factory[c] * 100 # dFT(%) = (STR-ST_OTP)/ST_OTP
             c = c + 1
         #print("Percentage differences to factory test:", dFT)
@@ -264,7 +266,17 @@ class ICM20602(object):
         
         return dFT
 
-    # todo write and verify
-    def write(self, reg, data):
-        data.insert(0, reg)
-        return self._bus.xfer(data)
+    # write and verify
+    def write(self, reg, data, ignorefail=0):
+        dataw = list(data)
+        dataw.insert(0, reg)
+        writeret = self._bus.xfer(data)
+        datar = self.read(reg, len(data))
+        del(dataw[0])
+        #print(ignorefail)
+        if datar != dataw and ignorefail == 0:
+            print("Wrote ", dataw, ", and read ", datar)
+            print("Write to register ", reg, " failed")
+            #exit()
+            time.sleep(2)
+        return writeret
