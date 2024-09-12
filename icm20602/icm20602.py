@@ -204,18 +204,20 @@ class ICM20602(object):
         gyrconfig[0] = gyrconfig[0] | 0b11100000 # In GYRO_CONFIG 1B, first 3 bits are (X,Y,Z)G_ST
         accconfig[0] = accconfig[0] | 0b11100000 # In ACCEL_CONFIG 1C, first 3 bits are (X,Y,Z)A_ST
         
-        self.write(self.REG_GYRO_CONFIG, gyrconfig) # Start test
-        self.write(self.REG_ACCEL_CONFIG, accconfig)
+        self.write(self.REG_GYRO_CONFIG, gyrconfig, nosleep=1) # Start test
+        self.write(self.REG_ACCEL_CONFIG, accconfig, nosleep=1)
         time.sleep(0.1)
         ontest = self.read_all()
         onresult = [ontest.a_raw.x, ontest.a_raw.y, ontest.a_raw.z, ontest.g_raw.x, ontest.g_raw.y, ontest.g_raw.z]
+        print(onresult)
         gyrconfig[0] = gyrconfig[0] & 0b00011111 # Off
         accconfig[0] = accconfig[0] & 0b00011111
-        self.write(self.REG_GYRO_CONFIG, gyrconfig) # Stop test
-        self.write(self.REG_ACCEL_CONFIG, accconfig)
+        self.write(self.REG_GYRO_CONFIG, gyrconfig, nosleep=1) # Stop test
+        self.write(self.REG_ACCEL_CONFIG, accconfig, nosleep=1)
         time.sleep(0.1)
         offtest = self.read_all()
         offresult = [offtest.a_raw.x, offtest.a_raw.y, offtest.a_raw.z, offtest.g_raw.x, offtest.g_raw.y, offtest.g_raw.z]
+        print(offresult)
         
         response = list(onresult)
         c = 0
@@ -267,7 +269,7 @@ class ICM20602(object):
         return dFT
 
     # write and verify
-    def write(self, reg, data, ignorefail=0):
+    def write(self, reg, data, ignorefail=0, nosleep=0):
         dataw = list(data)
         dataw.insert(0, reg)
         writeret = self._bus.xfer(data)
@@ -278,5 +280,6 @@ class ICM20602(object):
             print("Wrote ", dataw, ", and read ", datar)
             print("Write to register ", reg, " failed")
             #exit()
-            time.sleep(2)
+            if nosleep == 0:
+                time.sleep(2)
         return writeret
